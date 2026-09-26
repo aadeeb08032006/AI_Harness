@@ -2,10 +2,9 @@ import json
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Any
 
-import anthropic
-from openai import OpenAI
+from groq import Groq
 
 
 @dataclass
@@ -34,114 +33,16 @@ class LLMProvider(ABC):
     def format_assistant_message(self, response: LLMResponse) -> dict: ...
 
 
-class AnthropicProvider(LLMProvider):
+class GroqProvider(LLMProvider):
 
     def __init__(self):
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = os.environ.get("GROQ_API_KEY")
         if api_key is None:
-            raise ValueError("ANTHROPIC_API_KEY not set")
-        self.model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-        self.client = anthropic.Anthropic(api_key=api_key)
-        self.max_tokens = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "4096"))
-
-    def generate(
-        self,
-        messages: list[dict],
-        system: Optional[str] = None,
-        tools: Optional[list[dict]] = None,
-    ) -> LLMResponse:
-        kwargs = {
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            "messages": messages,
-        }
-        if system is not None:
-            kwargs["system"] = system
-        if tools:
-            kwargs["tools"] = tools
-
-        try:
-            response = self.client.messages.create(**kwargs)
-        except anthropic.APIError as e:
-            return LLMResponse(
-                text=None,
-                tool_calls=[],
-                stop_reason="error",
-                raw={"error": str(e)},
-            )
-
-        text_parts = []
-        tool_calls = []
-
-        for block in response.content:
-            if block.type == "text":
-                text_parts.append(block.text)
-            elif block.type == "tool_use":
-                tool_calls.append({
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input,
-                })
-
-        return LLMResponse(
-            text="\n".join(text_parts) if text_parts else None,
-            tool_calls=tool_calls,
-            stop_reason=response.stop_reason,
-            raw=response.model_dump() if hasattr(response, "model_dump") else None,
-        )
-
-    def format_tool_result(
-        self, tool_call_id: str, content: str, is_error: bool = False
-    ) -> dict:
-        return {
-            "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": tool_call_id,
-                "content": content,
-                "is_error": is_error,
-            }],
-        }
-
-    def format_assistant_message(self, response: LLMResponse) -> dict:
-        content = []
-        if response.text is not None:
-            content.append({
-                "type": "text",
-                "text": response.text,
-            })
-
-        for tc in response.tool_calls:
-            content.append({
-                "type": "tool_use",
-                "id": tc["id"],
-                "name": tc["name"],
-                "input": tc["input"],
-            })
-
-        return {
-            "role": "assistant",
-            "content": content,
-        }
-
-
-class OpenAICompatibleProvider(LLMProvider):
-
-    def __init__(self):
-        api_key = os.environ.get("LLM_API_KEY")
-        if api_key is None:
-            raise ValueError("LLM_API_KEY not set")
-        base_url = os.environ.get("LLM_BASE_URL")
-        # DeepSeek: https://api.deepseek.com
-        # Qwen (DashScope): https://dashscope.aliyuncs.com/compatible-mode/v1
-        if base_url is None:
-            raise ValueError("LLM_BASE_URL not set")
-        self.model = os.environ.get("LLM_MODEL")
-        # e.g. "deepseek-chat" or "qwen-max" — must match provider's exact model string
-        if self.model is None:
-            raise ValueError("LLM_MODEL not set")
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
-        self.max_tokens = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
+            raise ValueError("GROQ_API_KEY not set")
+        
+        self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.client = Groq(api_key=api_key)
+        self.max_tokens = int(os.environ.get("GROQ_MAX_TOKENS", "4096"))
 
     def generate(
         self,
@@ -153,7 +54,7 @@ class OpenAICompatibleProvider(LLMProvider):
         if system is not None:
             chat_messages.insert(0, {"role": "system", "content": system})
 
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": chat_messages,
             "max_tokens": self.max_tokens,
@@ -220,7 +121,7 @@ class OpenAICompatibleProvider(LLMProvider):
         }
 
     def format_assistant_message(self, response: LLMResponse) -> dict:
-        msg = {
+        msg: dict[str, Any] = {
             "role": "assistant",
             "content": response.text,
         }
@@ -241,45 +142,5 @@ class OpenAICompatibleProvider(LLMProvider):
         return msg
 
 
-def format_tool_result(tool_call_id: str, content: str, is_error: bool = False) -> dict:
-    return {
-        "role": "user",
-        "content": [{
-            "type": "tool_result",
-            "tool_use_id": tool_call_id,
-            "content": content,
-            "is_error": is_error,
-        }],
-    }
-
-
-def format_assistant_message(response: LLMResponse) -> dict:
-    content = []
-    if response.text is not None:
-        content.append({
-            "type": "text",
-            "text": response.text,
-        })
-
-    for tc in response.tool_calls:
-        content.append({
-            "type": "tool_use",
-            "id": tc["id"],
-            "name": tc["name"],
-            "input": tc["input"],
-        })
-
-    return {
-        "role": "assistant",
-        "content": content,
-    }
-
-
 def get_provider() -> LLMProvider:
-    provider_name = os.environ.get("LLM_PROVIDER", "anthropic").lower()
-    if provider_name == "anthropic":
-        return AnthropicProvider()
-    elif provider_name in ("openai", "deepseek", "qwen"):
-        return OpenAICompatibleProvider()
-    else:
-        raise ValueError(f"Unknown LLM_PROVIDER: {provider_name}")
+    return GroqProvider()
