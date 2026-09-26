@@ -20,16 +20,13 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from app.types import ToolCall, ToolResult
+    from .types import ToolCall, ToolResult
 except ImportError:
     try:
-        from .types import ToolCall, ToolResult
+        from backend.app.types import ToolCall, ToolResult
     except ImportError:
-        try:
-            from backend.app.types import ToolCall, ToolResult
-        except ImportError:
-            ToolCall = Any  # type: ignore[misc, assignment]
-            ToolResult = Any  # type: ignore[misc, assignment]
+        ToolCall = Any  # type: ignore[misc, assignment]
+        ToolResult = Any  # type: ignore[misc, assignment]
 
 
 # Directories ignored by repository scanners
@@ -376,6 +373,72 @@ def apply_patch(repo_path: str, patch: str) -> dict[str, Any]:
         else:
             error_msg = "Neither git nor patch command found on system to apply patch."
 
+    # Custom fallback for LLM-generated malformed patches (e.g. without line numbers)
+    # Tries to do a simple string replace for each file
+    if target_files:
+        try:
+            for target in target_files:
+                target_path = repo / target
+                if not target_path.exists():
+                    continue
+                
+                with open(target_path, "r", encoding="utf-8") as f:
+                    original_content = f.read()
+
+                # Extract the old text and new text from the patch by hunks
+                lines = clean_patch.splitlines()
+                hunks = []
+                current_hunk = {"old": [], "new": []}
+                in_hunk = False
+                
+                for line in lines:
+                    if line.startswith("@@"):
+                        if in_hunk and (current_hunk["old"] or current_hunk["new"]):
+                            hunks.append(current_hunk)
+                        current_hunk = {"old": [], "new": []}
+                        in_hunk = True
+                        continue
+                    if in_hunk:
+                        if line.startswith("-"):
+                            current_hunk["old"].append(line[1:])
+                        elif line.startswith("+"):
+                            current_hunk["new"].append(line[1:])
+                        elif line.startswith(" ") or line == "":
+                            line_content = line[1:] if line else ""
+                            current_hunk["old"].append(line_content)
+                            current_hunk["new"].append(line_content)
+                        elif line.startswith("\\ No newline"):
+                            continue
+
+                if in_hunk and (current_hunk["old"] or current_hunk["new"]):
+                    hunks.append(current_hunk)
+
+                updated_content = original_content
+                success_hunks = 0
+                for hunk in hunks:
+                    old_text = "\n".join(hunk["old"]) + "\n"
+                    new_text = "\n".join(hunk["new"]) + "\n"
+                    # Also try without trailing newline if exact match fails
+                    if old_text not in updated_content:
+                        old_text = "\n".join(hunk["old"])
+                        new_text = "\n".join(hunk["new"])
+                        
+                    if old_text in updated_content:
+                        updated_content = updated_content.replace(old_text, new_text, 1)
+                        success_hunks += 1
+
+                if success_hunks > 0:
+                    with open(target_path, "w", encoding="utf-8") as f:
+                        f.write(updated_content)
+                    return {
+                        "success": True,
+                        "files_changed": [target],
+                        "output": f"Successfully applied {success_hunks}/{len(hunks)} hunks via simple string replacement.",
+                        "error": None if success_hunks == len(hunks) else "Some hunks failed to apply.",
+                    }
+        except Exception as e:
+            error_msg += f"\nCustom replace fallback also failed: {e}"
+
     return {
         "success": False,
         "files_changed": [],
@@ -460,7 +523,7 @@ def run_tests(
             "exit_code": 124,
             "stdout": stdout,
             "stderr": stderr,
-            "output": (f"{stdout}\n{stderr}" if stdout else stderr).strip(),
+            "output": (f"{stdout}\n{stderr}" if len(stdout) > 0 else stderr).strip(),
         }
     except FileNotFoundError as e:
         err = f"Test runner executable not found: {e}"

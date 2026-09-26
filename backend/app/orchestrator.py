@@ -27,6 +27,14 @@ Rules:
 - Follow existing project conventions.
 - Treat test failures as feedback, not final outcomes.
 - Do not claim success without verification. The harness alone determines success.
+- When using apply_patch, you MUST provide a valid unified diff. DO NOT use '*** Begin Patch'.
+- The @@ line MUST include the line number ranges, exactly like @@ -1,2 +1,2 @@. Do NOT just write @@.
+Example of correct apply_patch format:
+--- a/file.py
++++ b/file.py
+@@ -1,2 +1,2 @@
+-old line
++new line
 """
 
 TOOLS = [
@@ -55,7 +63,7 @@ TOOLS = [
     },
     {
         "name": "apply_patch",
-        "description": "Apply a code patch to a file",
+        "description": "Apply a unified diff patch to a file. The patch must be a valid unified diff starting with --- and +++ headers.",
         "input_schema": {
             "type": "object",
             "properties": {"patch": {"type": "string"}},
