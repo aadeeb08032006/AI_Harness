@@ -142,6 +142,3 @@ class HarnessConfig:
     max_tokens: int = 4096
     timeout_seconds: int = 300
     verbose: bool = True
-
-# Added for orchestrator phase 5a
-AgentState.file_contents = {}

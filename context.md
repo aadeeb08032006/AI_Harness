@@ -7,11 +7,12 @@
 - **Separation of Concerns**:
   - `types.py`: Strictly data models and type definitions. No business logic, file I/O, or tool execution.
   - `tools.py`: Strictly the execution toolbox. No LLM prompts, orchestration, or agent state decisions.
-  - `context_manager.py`: (Pending) Manages context window, file selection, prompt assembly, and token pruning.
-  - `llm_provider.py`: (Pending) Interfaces with LLMs (e.g. OpenAI, Anthropic, Gemini).
-  - `verifier.py`: (Pending) Analyzes test outputs, validates fixes, checks diffs.
-  - `orchestrator.py`: (Pending) State machine driving the agent loop (`ANALYZING` -> `PLANNING` -> `CODING` -> `VERIFYING` -> `FIXING` -> `COMPLETED`/`FAILED`).
-  - `run_harness.py` / `main.py`: CLI and API entry points (FastAPI backend).
+  - `context_manager.py`: Manages context window, keyword ranking, and file selection.
+  - `llm_provider.py`: Interfaces with LLMs (Groq provider with function calling and message formatting).
+  - `verifier.py`: Analyzes test outputs, validates fixes, checks exit codes and failure traces.
+  - `orchestrator.py`: State machine driving the agent loop (`ANALYZING` -> `PLANNING` -> `CODING` -> `VERIFYING` -> `FIXING` -> `COMPLETED`/`FAILED`).
+  - `run_harness.py`: Primary CLI entry point parsing arguments and executing tasks.
+  - `main.py`: Lightweight application entry module delegating to `run_harness.py` and exposing programmatic `run()`.
 
 - **Execution Flow**:
   ```text
@@ -48,14 +49,28 @@
    - `git_diff(repo_path)`: Read-only diff retrieval against `HEAD` (or plain `git diff`); returns `""` if clean or not a git repo.
    - `AVAILABLE_TOOLS`: Registry mapping tool names to functions.
 
+3. **`backend/app/verifier.py`**:
+   - `verify(repo_path, test_command=None, timeout=60)`: Executes repository tests via `tools.run_tests`; evaluates outcomes; classifies normal test failures vs operational execution errors (timeouts, missing runners, invalid directories).
+   - `verify_state(state, ...)`: Synchronizes `AgentState.status`, `tests_passed`, `test_output`, and `errors`.
+   - `VerificationResult`: Structured return type with attribute and dictionary access (`verified`, `success`, `exit_code`, `output`, `stdout`, `stderr`, `error`, `execution_error`).
+
+4. **`backend/app/context_manager.py`**:
+   - `build_context(repo_path, task, top_k)`: Keyword extraction, scoring/ranking relevant repository files, and reading file contents within size limits.
+
+5. **`backend/app/llm_provider.py`**:
+   - `LLMProvider` abstract base and `GroqProvider` implementing tool calling conversions, chat completions, and message formatters.
+
+6. **`backend/app/orchestrator.py`**:
+   - `run_harness_loop(task, repo_path, max_iterations)`: Core agent loop coordinating state transitions (`ANALYZING` -> `PLANNING` -> `CODING` -> `VERIFYING` -> `FIXING`), tool execution, test verification, and recovery.
+
+7. **`backend/app/run_harness.py`**:
+   - Primary CLI execution script parsing `--repo`, `--task`, and `--max-iterations`, invoking orchestrator loop, dumping results to `outputs/result.json`, and setting exit codes.
+
+8. **`backend/app/main.py`**:
+   - Application entry point delegating CLI execution to `run_harness.main()` and exposing a direct programmatic `run(task, repo_path, max_iterations)` function.
+
 ### Pending / Next Components to Build
-- `backend/app/context_manager.py`: Relevant file selection, prompt construction, and context budget management.
-- `backend/app/llm_provider.py`: Standardized LLM client integration (tool calling, streaming, token tracking).
-- `backend/app/verifier.py`: Verification logic parsing test outputs, exit codes, and diff quality.
-- `backend/app/orchestrator.py`: Lifecycle coordinator executing the loop until success or budget exhaustion.
-- `backend/app/main.py`: FastAPI server for frontend interaction.
-- `backend/app/run_harness.py`: CLI harness runner.
-- `frontend/`: Interactive UI (HTML/CSS/JS) to monitor agent actions and diffs.
+- `backend/Dockerfile`: Isolated containerized sandbox environment for test execution.
 
 ## 4. Key Rules & Constraints for Future Models
 - **Standard Library Priority**: Keep dependencies minimal; use standard library where possible.

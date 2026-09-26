@@ -1,7 +1,22 @@
-from .types import AgentState, Status
-from .llm_provider import get_provider
-from .context_manager import build_context
-from . import tools
+try:
+    from .types import AgentState, Status
+    from .llm_provider import get_provider
+    from .context_manager import build_context
+    from .verifier import verify
+    from . import tools
+except ImportError:
+    try:
+        from backend.app.types import AgentState, Status
+        from backend.app.llm_provider import get_provider
+        from backend.app.context_manager import build_context
+        from backend.app.verifier import verify
+        from backend.app import tools
+    except ImportError:
+        from types import AgentState, Status  # type: ignore[no-redef]
+        from llm_provider import get_provider  # type: ignore[no-redef]
+        from context_manager import build_context  # type: ignore[no-redef]
+        from verifier import verify  # type: ignore[no-redef]
+        import tools  # type: ignore[no-redef]
 
 SYSTEM_PROMPT = """\
 You are an autonomous software-engineering agent working inside a harness.
@@ -86,7 +101,9 @@ def execute_tool(name: str, tool_input: dict, repo_path: str, state: AgentState)
         elif name == "apply_patch":
             result = tools.apply_patch(repo_path, tool_input["patch"])
             if result.get("success"):
-                state.files_changed.extend(result.get("files_changed", []))
+                for changed_file in result.get("files_changed", []):
+                    if changed_file not in state.files_changed:
+                        state.files_changed.append(changed_file)
                 return (result.get("output", "Success"), False)
             else:
                 return (f"Patch failed: {result.get('error', 'Unknown error')}", True)
@@ -150,9 +167,11 @@ def run_harness_loop(task: str, repo_path: str, max_iterations: int = 5) -> Agen
                 break   # model stopped requesting tools — ready for verification
 
         state.status = Status.VERIFYING
-        test_result = tools.run_tests(repo_path)
-        state.test_output = test_result["output"]
-        state.tests_passed = test_result["success"]
+        verification = verify(repo_path)
+        state.test_output = verification.output
+        state.tests_passed = verification.verified
+        if not verification.verified and verification.error:
+            state.add_error(verification.error)
 
         while not state.tests_passed and not state.budget_exhausted():
             state.status = Status.FIXING
@@ -175,11 +194,15 @@ def run_harness_loop(task: str, repo_path: str, max_iterations: int = 5) -> Agen
                 for call in response.tool_calls:
                     result_text, is_error = execute_tool(call["name"], call["input"], repo_path, state)
                     state.messages.append(llm.format_tool_result(call["id"], result_text, is_error))
+                    if call["name"] == "apply_patch" and not is_error:
+                        state.patch = call["input"].get("patch")
 
             state.status = Status.VERIFYING
-            test_result = tools.run_tests(repo_path)
-            state.test_output = test_result["output"]
-            state.tests_passed = test_result["success"]
+            verification = verify(repo_path)
+            state.test_output = verification.output
+            state.tests_passed = verification.verified
+            if not verification.verified and verification.error:
+                state.add_error(verification.error)
             state.iteration += 1
 
         if state.tests_passed:
