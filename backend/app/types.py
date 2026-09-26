@@ -57,12 +57,18 @@ class AgentState:
     result: dict[str, Any] | None = None
     file_contents: dict[str, str] = field(default_factory=dict)
     messages: list[dict[str, Any]] = field(default_factory=list)
+    tests_passed: bool = False
+    files_changed: list[str] = field(default_factory=list)
 
     def budget_exhausted(self) -> bool:
         """Check if iteration count has reached or exceeded max iterations."""
         return self.iteration >= self.max_iterations
 
-    def to_dict(self) -> dict[str, Any]:
+    def add_error(self, error: str) -> None:
+        """Append an error message to the errors list."""
+        self.errors.append(error)
+
+    def to_result_dict(self) -> dict[str, Any]:
         """Convert state to a serializable dictionary."""
         data = asdict(self)
         data["status"] = self.status.value
