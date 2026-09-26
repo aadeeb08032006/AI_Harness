@@ -55,6 +55,8 @@ class AgentState:
     iteration: int = 0
     max_iterations: int = 10
     result: dict[str, Any] | None = None
+    file_contents: dict[str, str] = field(default_factory=dict)
+    messages: list[dict[str, Any]] = field(default_factory=list)
 
     def budget_exhausted(self) -> bool:
         """Check if iteration count has reached or exceeded max iterations."""
@@ -134,3 +136,6 @@ class HarnessConfig:
     max_tokens: int = 4096
     timeout_seconds: int = 300
     verbose: bool = True
+
+# Added for orchestrator phase 5a
+AgentState.file_contents = {}
