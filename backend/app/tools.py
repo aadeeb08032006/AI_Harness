@@ -604,6 +604,57 @@ def git_diff(repo_path: str) -> str:
         return ""
 
 
+def run_command(repo_path: str, command: str, timeout: int = 15) -> str:
+    """Execute a local shell command safely within the repository root.
+
+    Args:
+        repo_path: Path to the target repository directory.
+        command: The shell command to execute.
+        timeout: Execution timeout in seconds.
+
+    Returns:
+        String containing exit code and combined stdout/stderr.
+    """
+    repo = Path(repo_path).resolve()
+    if not repo.is_dir():
+        return f"Error: Repository directory not found: {repo_path}"
+
+    # Basic static analysis to block dangerous commands
+    dangerous_tokens = {"shutdown", "reboot", "mkfs", "dd", "nc", "ncat"}
+    dangerous_substrings = ["rm -rf", "rm -f", "wget", "curl", "> /dev/"]
+    
+    cmd_lower = command.lower()
+    for sub in dangerous_substrings:
+        if sub in cmd_lower:
+            return f"Error: Command blocked by security policy (dangerous pattern '{sub}' detected)."
+            
+    tokens = cmd_lower.split()
+    if any(token in dangerous_tokens for token in tokens):
+        return f"Error: Command blocked by security policy (dangerous command detected)."
+        
+    try:
+        proc = subprocess.run(
+            command,
+            shell=True,
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        out = proc.stdout.strip()
+        err = proc.stderr.strip()
+        result = f"Exit code: {proc.returncode}\n"
+        if out:
+            result += f"Stdout:\n{out}\n"
+        if err:
+            result += f"Stderr:\n{err}\n"
+        return result
+    except subprocess.TimeoutExpired:
+        return f"Error: Command execution timed out after {timeout} seconds."
+    except Exception as e:
+        return f"Error: Unexpected error executing command: {e}"
+
+
 # Convenience map of all available tools for orchestrators
 AVAILABLE_TOOLS: dict[str, Any] = {
     "list_files": list_files,
@@ -612,4 +663,5 @@ AVAILABLE_TOOLS: dict[str, Any] = {
     "apply_patch": apply_patch,
     "run_tests": run_tests,
     "git_diff": git_diff,
+    "run_command": run_command,
 }

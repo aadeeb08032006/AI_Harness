@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+# Set PYTHONPATH to the current directory so that `backend.app` resolves correctly
+export PYTHONPATH="$(pwd):$PYTHONPATH"
+
+if [ -x ".venv/bin/python" ]; then
+    exec .venv/bin/python -m backend.app.run_harness "$@"
+else
+    exec python3 -m backend.app.run_harness "$@"
+fi
