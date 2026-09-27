@@ -488,11 +488,22 @@ def run_tests(
         else:
             cmd = list(test_command)
     else:
-        # Default to pytest
+        # Try pytest first, fall back to unittest discover
         if shutil.which("pytest"):
-            cmd = ["pytest"]
+            cmd = ["pytest", "-v", "--tb=short"]
         else:
-            cmd = [sys.executable, "-m", "pytest"]
+            # Check if there's a pytest in the current python env
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "pytest", "--version"],
+                    capture_output=True, timeout=5
+                )
+                if result.returncode == 0:
+                    cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
+                else:
+                    cmd = [sys.executable, "-m", "unittest", "discover", "-v"]
+            except Exception:
+                cmd = [sys.executable, "-m", "unittest", "discover", "-v"]
 
     try:
         proc = subprocess.run(
@@ -507,13 +518,17 @@ def run_tests(
         exit_code = proc.returncode
         success = (exit_code == 0)
         output = stdout if not stderr else (f"{stdout}\n{stderr}" if stdout else stderr)
+        # Cap output to keep LLM context lean (last 3000 chars is enough)
+        output_trimmed = output.strip()
+        if len(output_trimmed) > 3000:
+            output_trimmed = "...\n" + output_trimmed[-3000:]
 
         return {
             "success": success,
             "exit_code": exit_code,
             "stdout": stdout,
             "stderr": stderr,
-            "output": output.strip(),
+            "output": output_trimmed,
         }
     except subprocess.TimeoutExpired as e:
         stdout = (e.stdout or "") if isinstance(e.stdout, str) else ""
@@ -655,11 +670,67 @@ def run_command(repo_path: str, command: str, timeout: int = 15) -> str:
         return f"Error: Unexpected error executing command: {e}"
 
 
+def write_file(repo_path: str, file_path: str, content: str) -> dict[str, Any]:
+    """Write (overwrite) a file inside the repository with new content.
+
+    A simpler alternative to apply_patch — useful when the model wants to
+    rewrite an entire file rather than produce a diff.
+
+    Args:
+        repo_path: Path to the repository root directory.
+        file_path: Relative path to the target file.
+        content: Full new content to write to the file.
+
+    Returns:
+        Dictionary with 'success', 'files_changed', 'output', 'error'.
+    """
+    repo = Path(repo_path).resolve()
+    if not repo.is_dir():
+        return {
+            "success": False,
+            "files_changed": [],
+            "output": f"Repository directory not found: {repo_path}",
+            "error": f"Repository directory not found: {repo_path}",
+        }
+
+    target = Path(file_path)
+    resolved = (repo / target).resolve() if not target.is_absolute() else target.resolve()
+
+    try:
+        resolved.relative_to(repo)
+    except ValueError:
+        return {
+            "success": False,
+            "files_changed": [],
+            "output": f"Security error: path '{file_path}' resolves outside repository.",
+            "error": f"Security error: path '{file_path}' resolves outside repository.",
+        }
+
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(resolved, "w", encoding="utf-8") as f:
+            f.write(content)
+        return {
+            "success": True,
+            "files_changed": [file_path],
+            "output": f"Successfully wrote {len(content)} bytes to '{file_path}'.",
+            "error": None,
+        }
+    except OSError as e:
+        return {
+            "success": False,
+            "files_changed": [],
+            "output": f"Failed to write file: {e}",
+            "error": str(e),
+        }
+
+
 # Convenience map of all available tools for orchestrators
 AVAILABLE_TOOLS: dict[str, Any] = {
     "list_files": list_files,
     "search_code": search_code,
     "read_file": read_file,
+    "write_file": write_file,
     "apply_patch": apply_patch,
     "run_tests": run_tests,
     "git_diff": git_diff,

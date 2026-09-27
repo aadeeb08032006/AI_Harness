@@ -36,11 +36,12 @@ class LLMProvider(ABC):
 class GroqProvider(LLMProvider):
 
     def __init__(self):
-        api_key = os.environ.get("GROQ_API_KEY")
+        # Prefer the hackathon-standard AI_API_KEY, fallback to GROQ_API_KEY if needed.
+        api_key = os.environ.get("AI_API_KEY") or os.environ.get("GROQ_API_KEY")
         if api_key is None:
-            raise ValueError("GROQ_API_KEY not set")
+            raise ValueError("AI_API_KEY not set")
         
-        self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
         self.client = Groq(api_key=api_key)
         self.max_tokens = int(os.environ.get("GROQ_MAX_TOKENS", "4096"))
 
@@ -58,6 +59,7 @@ class GroqProvider(LLMProvider):
             "model": self.model,
             "messages": chat_messages,
             "max_tokens": self.max_tokens,
+            "temperature": 0.0,
         }
 
         if tools:

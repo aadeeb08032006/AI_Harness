@@ -30,6 +30,7 @@ def main(args_list: Sequence[str] | None = None) -> None:
     parser.add_argument("--allow-write", action="store_true", help="Allow code modification tools.")
     parser.add_argument("--run-tests", action="store_true", help="Force verification/test execution.")
     parser.add_argument("--auto-approve", action="store_true", help="Skip interactive approval for safe local write operations.")
+    parser.add_argument("--no-verify", action="store_true", help="Skip test verification (use for doc-only or non-code tasks).")
     args = parser.parse_args(args_list)
 
     if not args.json:
@@ -54,7 +55,7 @@ def main(args_list: Sequence[str] | None = None) -> None:
 
     # In a full implementation, we'd pass config down to restrict writes, etc.
     # Currently passing max_steps via max_iterations argument for backward compatibility
-    state = run_harness_loop(args.task, args.repo, args.max_steps)
+    state = run_harness_loop(args.task, args.repo, args.max_steps, no_verify=getattr(args, 'no_verify', False))
     result = state.to_result_dict()
 
     os.makedirs("outputs", exist_ok=True)
