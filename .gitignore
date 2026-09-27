@@ -9,3 +9,4 @@ htmlcov/
 venv/
 outputs/
 .DS_Store
+.vscode/
